@@ -43,15 +43,60 @@ function showHelp()
 
 function showList()
 {
-    View\showMessage("Функциональность базы данных ещё не реализована.");
-    View\showMessage("Список всех игр будет отображаться здесь.");
+    $db = new \olya2004\hangman\Database();
+    $games = $db->listGames();
+
+    if (empty($games)) {
+        View\showMessage("Нет сохранённых игр.");
+        return;
+    }
+
+    foreach ($games as $game) {
+        View\showMessage(sprintf(
+            "ID: %d | Игрок: %s | Слово: %s | Результат: %s | Дата: %s",
+            $game['id'], $game['player_name'], $game['word'], $game['result'], $game['game_date']
+        ));
+    }
 }
+
 
 function replayGame($id)
 {
-    View\showMessage("Функциональность базы данных ещё не реализована.");
-    View\showMessage("Повтор игры #$id будет отображаться здесь.");
+    $db = new \olya2004\hangman\Database();
+    $game = $db->getGameById((int)$id);
+
+    if (!$game) {
+        View\showMessage("Игра с ID #$id не найдена.");
+        return;
+    }
+
+    View\showMessage("Повтор игры #$id");
+    View\showMessage("Игрок: {$game['player_name']}, Слово: {$game['word']}, Дата: {$game['game_date']}");
+    View\showMessage("Исход: " . ($game['result'] === 'won' ? 'Выиграл' : 'Проиграл'));
+    View\showMessage("Попытки:");
+
+    $usedLetters = [];
+    $errors = 0;
+    $word = $game['word'];
+
+    foreach ($game['attempts'] as $attempt) {
+        $letter = $attempt['letter'];
+        $usedLetters[] = $letter;
+        if ($attempt['result'] === 'wrong') {
+            $errors++;
+        }
+
+        $maskedWord = '';
+        for ($i = 0; $i < strlen($word); $i++) {
+            $maskedWord .= in_array($word[$i], $usedLetters) ? $word[$i] : '_';
+            $maskedWord .= ' ';
+        }
+
+        View\showGameState(trim($maskedWord), $usedLetters, $errors);
+        View\showMessage("Ход {$attempt['attempt_number']}: буква '{$letter}' — {$attempt['result']}");
+    }
 }
+
 
 function startNewGame()
 {
@@ -79,17 +124,15 @@ function startNewGame()
 
         $result = Model\guessLetter($gameData, $letter);
 
-        if ($result) {
-            View\showMessage("Правильно!");
-        } else {
-            View\showMessage("Неправильно!");
-        }
+        View\showMessage($result ? "Правильно!" : "Неправильно!");
     }
 
-    View\showGameResult(
-        Model\isWon($gameData),
-        Model\getWord($gameData)
-    );
+    $won = Model\isWon($gameData);
+    View\showGameResult($won, Model\getWord($gameData));
 
-    View\showMessage("\nИгровая информация ещё не сохранена в базу данных.");
+    $db = new \olya2004\hangman\Database();
+    $gameData['result'] = $won ? 'won' : 'lost';
+    $db->saveGame($gameData);
+
+    View\showMessage("Игра сохранена в базу данных.");
 }
