@@ -59,11 +59,10 @@ function showList()
     }
 }
 
-
 function replayGame($id)
 {
     $db = new \olya2004\hangman\Database();
-    $game = $db->getGameById((int)$id);
+    $game = $db->loadGame((int)$id);
 
     if (!$game) {
         View\showMessage("Игра с ID #$id не найдена.");
@@ -71,13 +70,13 @@ function replayGame($id)
     }
 
     View\showMessage("Повтор игры #$id");
-    View\showMessage("Игрок: {$game['player_name']}, Слово: {$game['word']}, Дата: {$game['game_date']}");
-    View\showMessage("Исход: " . ($game['result'] === 'won' ? 'Выиграл' : 'Проиграл'));
+    View\showMessage("Игрок: {$game['game']['player_name']}, Слово: {$game['game']['word']}, Дата: {$game['game']['game_date']}");
+    View\showMessage("Исход: " . ($game['game']['result'] === 'won' ? 'Выиграл' : 'Проиграл'));
     View\showMessage("Попытки:");
 
     $usedLetters = [];
     $errors = 0;
-    $word = $game['word'];
+    $word = $game['game']['word'];
 
     foreach ($game['attempts'] as $attempt) {
         $letter = $attempt['letter'];
@@ -96,7 +95,6 @@ function replayGame($id)
         View\showMessage("Ход {$attempt['attempt_number']}: буква '{$letter}' — {$attempt['result']}");
     }
 }
-
 
 function startNewGame()
 {
@@ -131,8 +129,13 @@ function startNewGame()
     View\showGameResult($won, Model\getWord($gameData));
 
     $db = new \olya2004\hangman\Database();
-    $gameData['result'] = $won ? 'won' : 'lost';
-    $db->saveGame($gameData);
+    
+    $db->saveGame(
+        $gameData['playerName'], // playerName
+        $gameData['word'],       // word
+        $won ? 'won' : 'lost',   // result
+        $gameData['attempts']    // attempts
+    );
 
     View\showMessage("Игра сохранена в базу данных.");
 }

@@ -2,96 +2,87 @@
 
 namespace olya2004\hangman;
 
+use RedBeanPHP\R as R;
+
 class Database
 {
-    private $pdo;
-
     public function __construct()
     {
-        $this->pdo = new \PDO("sqlite:" . __DIR__ . "/../bin/hangman.db");
-        $this->createTables();
+        if (!R::testConnection()) {
+            R::setup('sqlite:' . __DIR__ . '/../bin/hangman.db');
+            R::useFeatureSet('novice/latest');
+        }
     }
 
-    private function createTables()
+    public function listGames(): array
     {
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS games (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                player_name TEXT NOT NULL,
-                word TEXT NOT NULL,
-                result TEXT CHECK(result IN ('won', 'lost')) NOT NULL,
-                game_date TEXT NOT NULL
-            )
-        ");
-
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS attempts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id INTEGER NOT NULL,
-                attempt_number INTEGER NOT NULL,
-                letter TEXT NOT NULL,
-                result TEXT CHECK(result IN ('correct', 'wrong')) NOT NULL,
-                FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE
-            )
-        ");
+        return R::getAll('SELECT * FROM games ORDER BY game_date DESC');
     }
 
-    public function saveGame(array $gameData): int
+    public function getGameList(): array
     {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO games (player_name, word, result, game_date)
-            VALUES (:player_name, :word, :result, :game_date)
-        ");
-        $stmt->execute([
-            'player_name' => $gameData['playerName'],
-            'word' => $gameData['word'],
-            'result' => $gameData['result'],
-            'game_date' => $gameData['gameDate']
-        ]);
+        return R::getAll('SELECT id, player_name, word, result, game_date FROM games ORDER BY game_date DESC');
+    }
 
-        $gameId = $this->pdo->lastInsertId();
+    public function loadGame(int $id): ?array
+    {
+        $game = R::load('games', $id);
+        if (!$game->id) {
+            return null;
+        }
 
-        $stmtAttempt = $this->pdo->prepare("
-            INSERT INTO attempts (game_id, attempt_number, letter, result)
-            VALUES (:game_id, :attempt_number, :letter, :result)
-        ");
+        $attempts = R::findAll('attempts', 'game_id = ? ORDER BY attempt_number', [$id]);
 
-        foreach ($gameData['attempts'] as $attempt) {
-            $stmtAttempt->execute([
-                'game_id' => $gameId,
-                'attempt_number' => $attempt['attempt'],
-                'letter' => $attempt['letter'],
-                'result' => $attempt['result']
-            ]);
+        return [
+            'game' => $game->export(),
+            'attempts' => R::exportAll($attempts)
+        ];
+    }
+
+    public function getPlayerName(int $id): ?string
+    {
+        return R::getCell('SELECT player_name FROM games WHERE id = ?', [$id]);
+    }
+
+    public function getWord(int $id): ?string
+    {
+        return R::getCell('SELECT word FROM games WHERE id = ?', [$id]);
+    }
+
+    public function getResult(int $id): ?string
+    {
+        return R::getCell('SELECT result FROM games WHERE id = ?', [$id]);
+    }
+
+    public function saveGame(string $playerName, string $word, string $result, array $attempts): int
+    {
+        $game = R::dispense('games');
+        $game->player_name = $playerName;
+        $game->word = $word;
+        $game->result = $result;
+        $game->game_date = date('Y-m-d H:i:s');
+
+        $gameId = R::store($game);
+
+        foreach ($attempts as $attempt) {
+            $attemptBean = R::dispense('attempts');
+            $attemptBean->game_id = $gameId;
+            $attemptBean->attempt_number = $attempt['attempt'];
+            $attemptBean->letter = $attempt['letter'];
+            $attemptBean->result = $attempt['result'];
+            R::store($attemptBean);
         }
 
         return $gameId;
     }
 
-    public function listGames(): array
+    public function saveGameFromModel(Model $model, string $result): int
     {
-        $stmt = $this->pdo->query("
-            SELECT id, player_name, word, result, game_date
-            FROM games
-            ORDER BY game_date DESC
-        ");
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
-    }
-
-    public function getGameById(int $id): ?array
-    {
-        $stmt = $this->pdo->prepare("SELECT * FROM games WHERE id = ?");
-        $stmt->execute([$id]);
-        $game = $stmt->fetch(\PDO::FETCH_ASSOC);
-
-        if (!$game) {
-            return null;
-        }
-
-        $stmtAttempts = $this->pdo->prepare("SELECT * FROM attempts WHERE game_id = ? ORDER BY attempt_number ASC");
-        $stmtAttempts->execute([$id]);
-        $game['attempts'] = $stmtAttempts->fetchAll(\PDO::FETCH_ASSOC);
-
-        return $game;
+        return $this->saveGame(
+            $model->getPlayerName(),
+            $model->getWord(),
+            $result,
+            $model->getAttempts()
+        );
     }
 }
